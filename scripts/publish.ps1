@@ -29,16 +29,14 @@ try {
         -o $tempOut
 
     $projectOut = Join-Path $repoRoot $Output
-    if (Test-Path -LiteralPath $projectOut) {
-        Remove-Item -LiteralPath $projectOut -Recurse -Force
-    }
-
-    New-Item -ItemType Directory -Path $projectOut | Out-Null
+    New-Item -ItemType Directory -Path $projectOut -Force | Out-Null
     Copy-Item `
         -LiteralPath (Join-Path $tempOut "PortableSecureNotepad.exe") `
-        -Destination (Join-Path $projectOut "PortableSecureNotepad.exe")
+        -Destination (Join-Path $projectOut "PortableSecureNotepad.exe") `
+        -Force
 
-    Get-ChildItem -LiteralPath $projectOut | Select-Object Name,Length,LastWriteTime
+    Get-Item -LiteralPath (Join-Path $projectOut "PortableSecureNotepad.exe") |
+        Select-Object Name,Length,LastWriteTime
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

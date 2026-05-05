@@ -12,9 +12,12 @@ internal sealed class MainForm : Form
     private readonly TextBox _previewBox = new();
     private readonly TextBox _composeBox = new();
     private readonly Label _statusLabel = new();
+    private readonly Button _stageButton = new();
     private readonly Button _commitButton = new();
+    private readonly List<NoteEntry> _pendingNotes = [];
 
-    private List<NoteEntry> _filteredNotes = [];
+    private List<NoteListItem> _filteredItems = [];
+    private bool _isCommitting;
 
     public MainForm(ExecutableVaultStore store, VaultDocument document, string password)
     {
@@ -26,6 +29,7 @@ internal sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(760, 560);
         ClientSize = new Size(920, 650);
+        FormClosing += ConfirmCloseWithPendingNotes;
 
         Controls.Add(BuildLayout());
         RefreshNotes();
@@ -51,7 +55,8 @@ internal sealed class MainForm : Form
         _composeBox.Dock = DockStyle.Fill;
         _composeBox.Multiline = true;
         _composeBox.ScrollBars = ScrollBars.Vertical;
-        _composeBox.PlaceholderText = "Type text to commit to the encrypted EXE...";
+        _composeBox.PlaceholderText = "Type a note entry...";
+        _composeBox.TextChanged += (_, _) => UpdateButtonStates();
         root.Controls.Add(_composeBox, 0, 2);
 
         root.Controls.Add(BuildBottomRow(), 0, 3);
@@ -113,20 +118,26 @@ internal sealed class MainForm : Form
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 2,
+            ColumnCount = 3,
             RowCount = 1
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
 
         _statusLabel.Dock = DockStyle.Fill;
         _statusLabel.TextAlign = ContentAlignment.MiddleLeft;
         panel.Controls.Add(_statusLabel, 0, 0);
 
-        _commitButton.Text = "Commit";
+        _stageButton.Text = "Save Entry";
+        _stageButton.Dock = DockStyle.Fill;
+        _stageButton.Click += SavePendingEntry;
+        panel.Controls.Add(_stageButton, 1, 0);
+
+        _commitButton.Text = "Commit All";
         _commitButton.Dock = DockStyle.Fill;
-        _commitButton.Click += CommitNote;
-        panel.Controls.Add(_commitButton, 1, 0);
+        _commitButton.Click += CommitPendingEntries;
+        panel.Controls.Add(_commitButton, 2, 0);
 
         return panel;
     }
@@ -134,22 +145,25 @@ internal sealed class MainForm : Form
     private void RefreshNotes()
     {
         string query = _searchBox.Text.Trim();
-        IEnumerable<NoteEntry> notes = _document.Notes.OrderByDescending(note => note.CreatedAt);
+        IEnumerable<NoteListItem> items = _document.Notes
+            .Select(note => new NoteListItem(note, isPending: false))
+            .Concat(_pendingNotes.Select(note => new NoteListItem(note, isPending: true)))
+            .OrderByDescending(item => item.Note.CreatedAt);
 
         if (!string.IsNullOrWhiteSpace(query))
         {
-            notes = notes.Where(note => Matches(note, query));
+            items = items.Where(item => Matches(item.Note, query));
         }
 
-        _filteredNotes = notes.ToList();
+        _filteredItems = items.ToList();
 
         _noteList.BeginUpdate();
         try
         {
             _noteList.Items.Clear();
-            foreach (NoteEntry note in _filteredNotes)
+            foreach (NoteListItem item in _filteredItems)
             {
-                _noteList.Items.Add(new NoteListItem(note));
+                _noteList.Items.Add(item);
             }
         }
         finally
@@ -166,7 +180,10 @@ internal sealed class MainForm : Form
             _previewBox.Clear();
         }
 
-        _statusLabel.Text = $"{_filteredNotes.Count} of {_document.Notes.Count} notes";
+        int totalCount = _document.Notes.Count + _pendingNotes.Count;
+        string pendingText = _pendingNotes.Count == 1 ? "1 pending" : $"{_pendingNotes.Count} pending";
+        _statusLabel.Text = $"{_filteredItems.Count} of {totalCount} entries visible; {pendingText}";
+        UpdateButtonStates();
     }
 
     private static bool Matches(NoteEntry note, string query)
@@ -179,7 +196,9 @@ internal sealed class MainForm : Form
     {
         if (_noteList.SelectedItem is NoteListItem item)
         {
-            _previewBox.Text = item.Note.Text;
+            _previewBox.Text = item.IsPending
+                ? $"Pending entry - not embedded in the EXE yet.{Environment.NewLine}{Environment.NewLine}{item.Note.Text}"
+                : item.Note.Text;
         }
         else
         {
@@ -187,44 +206,44 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void CommitNote(object? sender, EventArgs e)
+    private void SavePendingEntry(object? sender, EventArgs e)
     {
-        string text = _composeBox.Text.Trim();
+        string text = GetComposedText();
         if (string.IsNullOrWhiteSpace(text))
         {
-            _statusLabel.Text = "Type text before committing.";
+            _statusLabel.Text = "Type text before saving an entry.";
             return;
         }
 
+        _pendingNotes.Add(CreateNote(text));
+        _composeBox.Clear();
+        RefreshNotes();
+    }
+
+    private void CommitPendingEntries(object? sender, EventArgs e)
+    {
+        List<NoteEntry> notesToCommit = GetCommitBatch();
+        if (notesToCommit.Count == 0)
+        {
+            _statusLabel.Text = "Save or type an entry before committing.";
+            return;
+        }
+
+        _isCommitting = true;
+        _stageButton.Enabled = false;
         _commitButton.Enabled = false;
         UseWaitCursor = true;
 
         try
         {
-            var updatedDocument = new VaultDocument
-            {
-                Notes = _document.Notes
-                    .Select(note => new NoteEntry
-                    {
-                        Id = note.Id,
-                        CreatedAt = note.CreatedAt,
-                        Text = note.Text
-                    })
-                    .ToList()
-            };
-            updatedDocument.Notes.Add(new NoteEntry
-            {
-                Id = Guid.NewGuid(),
-                CreatedAt = DateTimeOffset.UtcNow,
-                Text = text
-            });
-
+            VaultDocument updatedDocument = VaultDocumentBatch.CreateWithAppendedNotes(_document, notesToCommit);
             byte[] encryptedPayload = VaultCrypto.Encrypt(updatedDocument, _password);
             ReplacementRequest request = _store.PrepareCommit(encryptedPayload);
             _store.StartReplacementHelper(request);
 
+            string entryLabel = notesToCommit.Count == 1 ? "entry" : "entries";
             MessageBox.Show(
-                "Note committed. The app will restart to embed the encrypted vault inside this EXE.",
+                $"{notesToCommit.Count} {entryLabel} committed. The app will restart to embed the encrypted vault inside this EXE.",
                 "Commit saved",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -238,19 +257,96 @@ internal sealed class MainForm : Form
                 "Commit failed",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
+            _isCommitting = false;
+            _stageButton.Enabled = true;
             _commitButton.Enabled = true;
             UseWaitCursor = false;
         }
     }
 
+    private List<NoteEntry> GetCommitBatch()
+    {
+        var notesToCommit = _pendingNotes
+            .Select(note => new NoteEntry
+            {
+                Id = note.Id,
+                CreatedAt = note.CreatedAt,
+                Text = note.Text
+            })
+            .ToList();
+
+        string text = GetComposedText();
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            notesToCommit.Add(CreateNote(text));
+        }
+
+        return notesToCommit;
+    }
+
+    private string GetComposedText()
+    {
+        return _composeBox.Text.Trim();
+    }
+
+    private static NoteEntry CreateNote(string text)
+    {
+        return new NoteEntry
+        {
+            Id = Guid.NewGuid(),
+            CreatedAt = DateTimeOffset.UtcNow,
+            Text = text
+        };
+    }
+
+    private void UpdateButtonStates()
+    {
+        if (_isCommitting)
+        {
+            _stageButton.Enabled = false;
+            _commitButton.Enabled = false;
+            return;
+        }
+
+        bool hasComposedText = !string.IsNullOrWhiteSpace(GetComposedText());
+        _stageButton.Enabled = hasComposedText;
+        _commitButton.Enabled = hasComposedText || _pendingNotes.Count > 0;
+    }
+
+    private void ConfirmCloseWithPendingNotes(object? sender, FormClosingEventArgs e)
+    {
+        if (_isCommitting)
+        {
+            return;
+        }
+
+        bool hasUnsavedWork = _pendingNotes.Count > 0 || !string.IsNullOrWhiteSpace(GetComposedText());
+        if (!hasUnsavedWork)
+        {
+            return;
+        }
+
+        DialogResult result = MessageBox.Show(
+            "Close without committing pending entries?",
+            "Pending entries",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2);
+
+        e.Cancel = result != DialogResult.Yes;
+    }
+
     private sealed class NoteListItem
     {
-        public NoteListItem(NoteEntry note)
+        public NoteListItem(NoteEntry note, bool isPending)
         {
             Note = note;
+            IsPending = isPending;
         }
 
         public NoteEntry Note { get; }
+
+        public bool IsPending { get; }
 
         public override string ToString()
         {
@@ -264,7 +360,8 @@ internal sealed class MainForm : Form
                 firstLine = firstLine[..67] + "...";
             }
 
-            return $"{Note.CreatedAt.LocalDateTime:g}  {firstLine}";
+            string state = IsPending ? "[pending] " : string.Empty;
+            return $"{state}{Note.CreatedAt.LocalDateTime:g}  {firstLine}";
         }
     }
 }

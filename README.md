@@ -20,9 +20,9 @@ The publish script builds from a temporary copy of `src` before copying the fina
 
 ## Use
 
-On first launch, create a password or PIN. Type note text into the compose box and click `Commit`. The app writes an updated replacement EXE, exits briefly, swaps the updated EXE into place, and relaunches.
+On first launch, create a password or PIN. Type note text into the compose box and click `Save Entry` to queue it. Repeat for as many entries as needed, then click `Commit All`. The app writes an updated replacement EXE, exits briefly, swaps the updated EXE into place, and relaunches.
 
-On later launches, enter the same password/PIN to decrypt notes. Search filters the timestamped note list as each key is typed.
+On later launches, enter the same password/PIN to decrypt notes. Search filters the timestamped note list as each key is typed. Pending entries are visible in the list before commit, but they are only embedded into the EXE after `Commit All` completes.
 
 ## Storage and Recovery
 
