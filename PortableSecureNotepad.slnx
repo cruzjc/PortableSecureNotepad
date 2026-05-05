@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PortableSecureNotepad.Core/PortableSecureNotepad.Core.csproj" />
+    <Project Path="src/PortableSecureNotepad/PortableSecureNotepad.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PortableSecureNotepad.Tests/PortableSecureNotepad.Tests.csproj" />
+  </Folder>
+</Solution>
