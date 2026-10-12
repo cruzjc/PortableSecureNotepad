@@ -22,7 +22,7 @@ const string newPassword = "new-smoke-password";
 if (args.Length > 0 && args[0] == "verify-backup")
 {
     var saved = VaultCrypto.Decrypt(EmbeddedPayload.ReadPayload(args[1])!, newPassword);
-    if (saved.Notes.Count != 2 || !saved.Notes.Any(note => note.Text == "committed state"))
+    if (saved.Notes.Count != 3 || !saved.Notes.Any(note => note.Text == "committed state"))
         throw new Exception("Publish backup did not retain the rekeyed, edited vault and draft");
     Console.WriteLine("Publish backup decrypts to the committed state.");
     return;
@@ -37,6 +37,9 @@ if (args.Length > 0 && args[0] == "stage")
     using var owner = VaultInstanceLock.TryAcquire(target, TimeSpan.Zero)
         ?? throw new Exception("Could not lock smoke fixture");
     var store = new ExecutableVaultStore(target);
+    var previous = VaultCrypto.Decrypt(store.ReadPayload()!, password);
+    VaultTransfer.WriteExport(Path.Combine(directory, "previous.json"), VaultTransfer.SerializePlain(previous, VaultExportFormat.Json), VaultExportFormat.Json);
+    File.WriteAllText(Path.Combine(directory, "production-helper-path.txt"), appExe);
     using var session = new VaultSession(VaultCrypto.Decrypt(store.ReadPayload()!, password), password);
     session.BeginEdit(session.Notes.Single().Id);
     session.UpdateDraft("committed state");
@@ -71,16 +74,16 @@ try
         throw new Exception("Saved executable hash differs from helper confirmation");
     byte[] savedPayload = EmbeddedPayload.ReadPayload(executable)!;
     var saved = VaultCrypto.Decrypt(savedPayload, newPassword);
-    if (saved.Notes.Count != 2 || !saved.Notes.Any(note => note.Text == "committed state") ||
+    bool secondCommit = File.Exists(Path.Combine(root, "second-commit.txt"));
+    if (saved.Notes.Count != (secondCommit ? 3 : 2) || !saved.Notes.Any(note => note.Text == "committed state") ||
         !saved.Notes.Any(note => note.Text == "preserved draft")) throw new Exception("Edited note and draft were not saved");
     bool oldPasswordRejected = false;
     try { VaultCrypto.Decrypt(savedPayload, password); }
     catch (VaultUnlockException) { oldPasswordRejected = true; }
     if (!oldPasswordRejected) throw new Exception("Old password still unlocks rekeyed target");
-    string backup = Directory.GetFiles(root, "*.backup.exe").Single();
-    string oldNote = VaultCrypto.Decrypt(EmbeddedPayload.ReadPayload(backup)!, password).Notes.Single().Text;
-    if (oldNote != "previous state") throw new Exception("Previous state was not retained");
-    var previous = VaultCrypto.Decrypt(EmbeddedPayload.ReadPayload(backup)!, password).Notes.Single();
+    if (Directory.GetFiles(root, "*.backup.exe").Length != 0)
+        throw new Exception("Commit unexpectedly created a backup EXE");
+    var previous = VaultTransfer.ReadPlainJson(Path.Combine(root, "previous.json")).Notes.Single();
     var edited = saved.Notes.Single(note => note.Text == "committed state");
     if (edited.Id != previous.Id || edited.CreatedAt != previous.CreatedAt || edited.UpdatedAt is null)
         throw new Exception("Editing did not preserve note identity, creation date and edit date");
@@ -98,7 +101,23 @@ try
     if (File.Exists(helper)) throw new Exception("Helper was not cleaned up");
     if (Directory.GetFiles(root, "*.pending.exe").Length != 0)
         throw new Exception("Successful replacement left an unconsumed pending EXE");
-    File.WriteAllText(Path.Combine(root, "passed.txt"), "Published helper saved edited notes and a locked draft with the new password, retained the old-password backup, verified exports/import, relaunched, released the lock, and cleaned up.");
+    if (Directory.GetFiles(root, "*.exe").Length != 1)
+        throw new Exception("Successful commit did not leave exactly one EXE");
+    if (!secondCommit)
+    {
+        // Commit a second time to the same executable and check that no EXEs accumulate.
+        File.WriteAllText(Path.Combine(root, "second-commit.txt"), "started");
+        using var session = new VaultSession(saved, newPassword);
+        session.UpdateDraft("second commit entry");
+        var store = new ExecutableVaultStore(executable);
+        var request = store.PrepareCommit(session.CreateCommitPayload());
+        File.Copy(File.ReadAllText(Path.Combine(root, "production-helper-path.txt")), request.HelperPath, overwrite: true);
+        store.StartReplacementHelper(request);
+        return;
+    }
+    if (!saved.Notes.Any(note => note.Text == "second commit entry"))
+        throw new Exception("Second commit was not saved in the same EXE");
+    File.WriteAllText(Path.Combine(root, "passed.txt"), "Two commits to the same EXE passed: saved notes and password verified, zero backup EXEs, temporary helpers cleaned up, exactly one EXE remaining. Manual exports/import also passed.");
 }
 catch (Exception ex)
 {

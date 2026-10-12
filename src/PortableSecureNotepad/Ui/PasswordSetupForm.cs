@@ -35,7 +35,7 @@ internal sealed class PasswordSetupForm : Form
         var intro = new Label
         {
             Text = changePassword
-                ? "Changing the password commits current notes and the draft, then restarts. Existing backups keep their old password."
+                ? "Changing the password commits current notes and the draft, then restarts. Exported backups keep their original password."
                 : "Create the password or PIN used to encrypt notes inside this EXE.",
             Dock = DockStyle.Fill,
             AutoSize = false

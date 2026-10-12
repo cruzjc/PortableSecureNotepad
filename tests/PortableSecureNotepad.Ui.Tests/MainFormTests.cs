@@ -72,7 +72,7 @@ public sealed class MainFormTests
         var all = Descendants(dialog).ToArray();
         Assert.HasCount(3, all.OfType<TextBox>());
         Assert.IsTrue(all.OfType<TextBox>().All(field => field.UseSystemPasswordChar));
-        Assert.IsTrue(all.OfType<Label>().Any(label => label.Text.Contains("backups keep their old password")));
+        Assert.IsTrue(all.OfType<Label>().Any(label => label.Text.Contains("backups keep their original password")));
         Capture(dialog, "password-change.png");
     });
 

@@ -35,7 +35,6 @@ public sealed class ExecutableVaultStore
         string id = Guid.NewGuid().ToString("N");
         string pendingPath = Path.Combine(directory, $"{stem}{TempMarker}{id}.pending.exe");
         string helperPath = Path.Combine(directory, $"{stem}{TempMarker}{id}.helper.exe");
-        string backupPath = Path.Combine(directory, $"{stem}{TempMarker}{id}.backup.exe");
 
         EmbeddedPayload.WriteExecutableWithPayload(ExecutablePath, pendingPath, encryptedPayload);
         EmbeddedPayload.WriteExecutableWithoutPayload(ExecutablePath, helperPath);
@@ -45,7 +44,6 @@ public sealed class ExecutableVaultStore
             TargetPath: ExecutablePath,
             ReplacementPath: pendingPath,
             HelperPath: helperPath,
-            BackupPath: backupPath,
             ExpectedTargetHash: _expectedTargetHash);
     }
 
@@ -68,8 +66,6 @@ public sealed class ExecutableVaultStore
         startInfo.ArgumentList.Add(request.ReplacementPath);
         startInfo.ArgumentList.Add("--helper");
         startInfo.ArgumentList.Add(request.HelperPath);
-        startInfo.ArgumentList.Add("--backup");
-        startInfo.ArgumentList.Add(request.BackupPath);
         startInfo.ArgumentList.Add("--expected-hash");
         startInfo.ArgumentList.Add(request.ExpectedTargetHash);
 
@@ -126,5 +122,4 @@ public sealed record ReplacementRequest(
     string TargetPath,
     string ReplacementPath,
     string HelperPath,
-    string BackupPath,
     string ExpectedTargetHash);
