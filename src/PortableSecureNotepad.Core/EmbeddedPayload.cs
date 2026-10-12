@@ -15,6 +15,7 @@ public static class EmbeddedPayload
     private static readonly byte[] FooterMagic = Encoding.ASCII.GetBytes("PSNVAULT.FOOTER1");
 
     public static int FooterSize => sizeof(ulong) + FooterMagic.Length;
+    public const int MaximumPayloadLength = 64 * 1024 * 1024;
 
     public static PayloadLocation Locate(Stream stream)
     {
@@ -71,9 +72,9 @@ public static class EmbeddedPayload
             return null;
         }
 
-        if (location.PayloadLength > int.MaxValue)
+        if (location.PayloadLength == 0 || location.PayloadLength > MaximumPayloadLength)
         {
-            throw new InvalidDataException("Embedded payload is too large to load.");
+            throw new InvalidDataException("Embedded payload is empty or exceeds the 64 MiB limit.");
         }
 
         byte[] payload = new byte[location.PayloadLength];
@@ -87,6 +88,10 @@ public static class EmbeddedPayload
         string destinationExecutablePath,
         ReadOnlySpan<byte> payload)
     {
+        if (payload.IsEmpty || payload.Length > MaximumPayloadLength)
+        {
+            throw new InvalidDataException("Embedded payload is empty or exceeds the 64 MiB limit.");
+        }
         CopyExecutableBase(sourceExecutablePath, destinationExecutablePath, payload);
     }
 

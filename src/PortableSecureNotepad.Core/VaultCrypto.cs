@@ -24,6 +24,7 @@ public static class VaultCrypto
     public static byte[] Encrypt(VaultDocument document, string password)
     {
         ArgumentNullException.ThrowIfNull(document);
+        ValidateDocument(document);
         ValidatePassword(password);
 
         byte[] plaintext = JsonSerializer.SerializeToUtf8Bytes(document, JsonOptions);
@@ -80,22 +81,19 @@ public static class VaultCrypto
 
         try
         {
-            using var aes = new AesGcm(key, TagSize);
-            aes.Decrypt(envelope.Nonce, envelope.Ciphertext, envelope.Tag, plaintext, AssociatedData);
-        }
-        catch (CryptographicException ex)
-        {
-            throw new VaultUnlockException("Password/PIN did not unlock this vault.", ex);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(key);
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<VaultDocument>(plaintext, JsonOptions)
+            try
+            {
+                using var aes = new AesGcm(key, TagSize);
+                aes.Decrypt(envelope.Nonce, envelope.Ciphertext, envelope.Tag, plaintext, AssociatedData);
+            }
+            catch (CryptographicException ex)
+            {
+                throw new VaultUnlockException("Password/PIN did not unlock this vault.", ex);
+            }
+            VaultDocument document = JsonSerializer.Deserialize<VaultDocument>(plaintext, JsonOptions)
                 ?? throw new InvalidDataException("Vault document is empty.");
+            ValidateDocument(document);
+            return document;
         }
         catch (JsonException ex)
         {
@@ -103,6 +101,7 @@ public static class VaultCrypto
         }
         finally
         {
+            CryptographicOperations.ZeroMemory(key);
             CryptographicOperations.ZeroMemory(plaintext);
         }
     }
@@ -137,16 +136,26 @@ public static class VaultCrypto
             throw new InvalidDataException("Unsupported vault key derivation function.");
         }
 
-        if (envelope.Iterations < 100_000)
+        if (envelope.Iterations < 100_000 || envelope.Iterations > 2_000_000)
         {
-            throw new InvalidDataException("Vault key derivation iteration count is too low.");
+            throw new InvalidDataException("Vault key derivation iteration count is outside the supported range.");
         }
 
-        if (envelope.Salt.Length != SaltSize ||
-            envelope.Nonce.Length != NonceSize ||
-            envelope.Tag.Length != TagSize)
+        if (envelope.Salt is null || envelope.Salt.Length != SaltSize ||
+            envelope.Nonce is null || envelope.Nonce.Length != NonceSize ||
+            envelope.Tag is null || envelope.Tag.Length != TagSize ||
+            envelope.Ciphertext is null || envelope.Ciphertext.Length == 0)
         {
             throw new InvalidDataException("Vault envelope has invalid cryptographic parameters.");
+        }
+    }
+
+    private static void ValidateDocument(VaultDocument document)
+    {
+        if (document.Version != CurrentVersion || document.Notes is null ||
+            document.Notes.Any(note => note is null || note.Text is null))
+        {
+            throw new InvalidDataException("Vault document has an unsupported version or invalid note data.");
         }
     }
 

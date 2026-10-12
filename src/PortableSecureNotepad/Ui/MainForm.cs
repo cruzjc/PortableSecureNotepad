@@ -241,25 +241,18 @@ internal sealed class MainForm : Form
             ReplacementRequest request = _store.PrepareCommit(encryptedPayload);
             _store.StartReplacementHelper(request);
 
-            string entryLabel = notesToCommit.Count == 1 ? "entry" : "entries";
-            MessageBox.Show(
-                $"{notesToCommit.Count} {entryLabel} committed. The app will restart to embed the encrypted vault inside this EXE.",
-                "Commit saved",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-
+            _statusLabel.Text = "Commit prepared. Restarting to save and verify the encrypted vault...";
             Application.Exit();
         }
         catch (Exception ex)
         {
             MessageBox.Show(
-                ex.Message,
+                $"{ex.Message}{Environment.NewLine}{Environment.NewLine}Your entries remain in this window. Any prepared pending EXE is preserved in:{Environment.NewLine}{Path.GetDirectoryName(_store.ExecutablePath)}",
                 "Commit failed",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
             _isCommitting = false;
-            _stageButton.Enabled = true;
-            _commitButton.Enabled = true;
+            UpdateButtonStates();
             UseWaitCursor = false;
         }
     }
