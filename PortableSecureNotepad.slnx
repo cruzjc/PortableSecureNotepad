@@ -4,6 +4,7 @@
     <Project Path="src/PortableSecureNotepad/PortableSecureNotepad.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/PortableSecureNotepad.Ui.Tests/PortableSecureNotepad.Ui.Tests.csproj" />
     <Project Path="tests/PortableSecureNotepad.Tests/PortableSecureNotepad.Tests.csproj" />
   </Folder>
 </Solution>

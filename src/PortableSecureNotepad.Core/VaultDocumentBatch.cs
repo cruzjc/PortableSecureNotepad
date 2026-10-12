@@ -25,6 +25,7 @@ public static class VaultDocumentBatch
         {
             Id = note.Id,
             CreatedAt = note.CreatedAt,
+            UpdatedAt = note.UpdatedAt,
             Text = note.Text
         };
     }

@@ -30,6 +30,28 @@ On first launch, create a password or PIN. Type note text into the compose box a
 
 On later launches, enter the same password/PIN to decrypt notes. Search filters the timestamped note list as each key is typed. Pending entries are visible in the list before commit, but they are only embedded into the EXE after `Commit All` completes.
 
+## Editing and Locking
+
+Select an entry and click `Edit selected`, double-click it, or press `Ctrl+E`. Edit its text, then click `Update Entry` (`Ctrl+S`) to stage the change. The original entry ID and creation date are preserved, and an edit date is recorded. `Cancel edit` discards only the editor changes. `Commit All` (`Ctrl+Shift+S`) saves staged changes and the current draft through the verified restart flow. Editing a pending entry updates it instead of creating a duplicate. Search keeps the selected entry when it still matches.
+
+Use **Vault → Lock now** or `Ctrl+L` to clear the note list, preview, search and editor. Working notes, pending changes and the exact unfinished draft are held in an encrypted in-memory checkpoint. Use **Vault → Unlock** or `Ctrl+L` again and enter the current password to resume. A failed or canceled unlock leaves the screen locked. Locking does not commit to disk; closing the app still discards uncommitted work after confirmation.
+
+Use **Vault → Change password/PIN** to enter the current password and confirm a new one. This commits all working notes and the current draft, then restarts. The new EXE requires the new password. If preparation fails, the current window retains its original password and work. Old EXE backups and earlier encrypted exports still require their original password; changing the current password does not change those files.
+
+## Backup, Export and Import
+
+The **File** menu offers three formats. Exports always include every working entry and the active draft, regardless of the search filter, without changing the EXE or marking work as committed.
+
+| Format | Use |
+| --- | --- |
+| Encrypted `.psnvault` | A compact, restorable backup encrypted with the current vault password (`Ctrl+Shift+E`). |
+| Unencrypted `.json` | A restorable export retaining entry IDs, creation dates and edit dates. |
+| Unencrypted `.txt` | Readable UTF-8 notes with timestamps; text exports are not imported as structured backups. |
+
+Plain exports show a confirmation explaining that the notes are unencrypted. Export filenames must match their format, so export cannot overwrite an EXE. Files are staged, flushed and verified before atomic replacement of an existing export.
+
+Choose **File → Import backup** (`Ctrl+Shift+I`) to import `.psnvault`, JSON, or an older portable EXE backup. Encrypted backups request the password used when that backup was created. Imported entries are staged until `Commit All`. Existing entries are preserved: repeated identical entries are skipped, and conflicting versions of an entry are imported under a new ID rather than overwriting your current text. Save a backup before upgrading to a newly published EXE, then import it into the new app.
+
 ## Storage and Recovery
 
 The vault is encrypted with AES-GCM. The encryption key is derived from the password/PIN with PBKDF2-SHA256 and a per-vault salt. Losing the password/PIN means the embedded notes cannot be recovered.

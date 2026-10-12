@@ -4,9 +4,9 @@ internal sealed class UnlockForm : Form
 {
     private readonly TextBox _passwordBox = new();
 
-    public UnlockForm()
+    public UnlockForm(string title = "Unlock Notes", string message = "Enter the password or PIN for this portable notepad.")
     {
-        Text = "Unlock Notes";
+        Text = title;
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -28,7 +28,7 @@ internal sealed class UnlockForm : Form
 
         var intro = new Label
         {
-            Text = "Enter the password or PIN for this portable notepad.",
+            Text = message,
             Dock = DockStyle.Fill,
             AutoSize = false
         };

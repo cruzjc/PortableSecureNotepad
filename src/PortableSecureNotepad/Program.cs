@@ -109,7 +109,11 @@ internal static class Program
             MessageBox.Show("The encrypted vault was saved and verified. The previous EXE was retained as a backup.",
                 "Commit saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
-        Application.Run(new MainForm(store, document, password));
+        using var session = new VaultSession(document, password);
+        // The session owns the unlocked state and can release it during manual locking.
+        document = null!;
+        password = string.Empty;
+        Application.Run(new MainForm(store, session));
         return 0;
     }
 
