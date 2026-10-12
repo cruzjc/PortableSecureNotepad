@@ -221,4 +221,94 @@ public sealed class VaultSessionTests
         Assert.HasCount(2, session.Notes);
         Assert.AreEqual(0, session.Import(imported));
     }
+
+    [TestMethod]
+    public void DeleteLastSavedEntry_StagesEmptyVaultAndSurvivesLock()
+    {
+        var original = Source();
+        using var session = new VaultSession(original, Password);
+        session.DeleteNote(original.Notes[0].Id);
+        Assert.IsEmpty(session.Notes);
+        Assert.IsTrue(session.HasChanges);
+        Assert.AreEqual(1, session.ChangedCount);
+        Assert.HasCount(1, original.Notes);
+        session.Lock();
+        Assert.IsTrue(session.HasChanges);
+        session.Unlock(Password);
+        Assert.IsEmpty(VaultCrypto.Decrypt(session.CreateCommitPayload(), Password).Notes);
+        Assert.IsEmpty(VaultCrypto.Decrypt(session.CreateExport(VaultExportFormat.Encrypted), Password).Notes);
+    }
+
+    [TestMethod]
+    public void DeletePendingEntry_CancelsAdditionWithoutLeavingPhantomChanges()
+    {
+        using var session = new VaultSession(Source(), Password);
+        session.UpdateDraft("pending entry");
+        Guid pending = session.SaveDraft();
+        session.DeleteNote(pending);
+        Assert.HasCount(1, session.Notes);
+        Assert.IsFalse(session.HasChanges);
+        Assert.AreEqual(0, session.ChangedCount);
+        Assert.IsFalse(session.IsAdded(pending));
+    }
+
+    [TestMethod]
+    public void DeleteEditedEntry_ClearsItsDraftAndDoesNotResurrectItOnCommit()
+    {
+        using var session = new VaultSession(Source(), Password);
+        Guid id = session.Notes[0].Id;
+        session.BeginEdit(id);
+        session.UpdateDraft("unfinished changes to deleted entry");
+        session.DeleteNote(id);
+        Assert.IsNull(session.EditingNoteId);
+        Assert.AreEqual(string.Empty, session.DraftText);
+        Assert.IsEmpty(session.Snapshot().Notes);
+        Assert.IsEmpty(VaultCrypto.Decrypt(session.CreateCommitPayload(), Password).Notes);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void DeleteDifferentEntry_PreservesNewDraftOrOtherActiveEdit(bool editingAnother)
+    {
+        var source = Source();
+        var other = new NoteEntry { Text = "keep this entry" };
+        source.Notes.Add(other);
+        using var session = new VaultSession(source, Password);
+        if (editingAnother) session.BeginEdit(other.Id);
+        session.UpdateDraft("keep this unfinished draft");
+        session.DeleteNote(source.Notes[0].Id);
+        Assert.AreEqual("keep this unfinished draft", session.DraftText);
+        Assert.AreEqual(editingAnother ? other.Id : (Guid?)null, session.EditingNoteId);
+        Assert.HasCount(editingAnother ? 1 : 2, session.Snapshot().Notes);
+        Assert.IsFalse(session.Snapshot().Notes.Any(note => note.Id == source.Notes[0].Id));
+    }
+
+    [TestMethod]
+    public void Delete_RejectsMissingEntryAndLockedSessionWithoutChangingNotes()
+    {
+        using var session = new VaultSession(Source(), Password);
+        Guid id = session.Notes[0].Id;
+        Assert.ThrowsExactly<ArgumentException>(() => session.DeleteNote(Guid.NewGuid()));
+        Assert.IsFalse(session.HasChanges);
+        session.Lock();
+        Assert.ThrowsExactly<InvalidOperationException>(() => session.DeleteNote(id));
+        session.Unlock(Password);
+        Assert.HasCount(1, session.Notes);
+        Assert.IsFalse(session.HasChanges);
+    }
+
+    [TestMethod]
+    public void DeleteReimportedSavedEntry_RemainsDirtySoOriginalDeletionCanBeCommitted()
+    {
+        var source = Source();
+        using var session = new VaultSession(source, Password);
+        Guid id = source.Notes[0].Id;
+        session.DeleteNote(id);
+        Assert.AreEqual(1, session.Import(source));
+        session.DeleteNote(id);
+        Assert.IsTrue(session.HasChanges);
+        Assert.AreEqual(1, session.ChangedCount);
+        Assert.IsEmpty(VaultCrypto.Decrypt(session.CreateCommitPayload(), Password).Notes);
+    }
 }
