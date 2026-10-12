@@ -4,57 +4,71 @@ internal sealed class PasswordSetupForm : Form
 {
     private readonly TextBox _passwordBox = new();
     private readonly TextBox _confirmBox = new();
+    private readonly TextBox _currentBox = new();
+    private readonly bool _changePassword;
 
-    public PasswordSetupForm()
+    public PasswordSetupForm(bool changePassword = false)
     {
-        Text = "Create Password/PIN";
+        _changePassword = changePassword;
+        Text = changePassword ? "Change Password/PIN" : "Create Password/PIN";
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(420, 220);
+        ClientSize = changePassword ? new Size(500, 300) : new Size(420, 220);
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             Padding = new Padding(18),
             ColumnCount = 2,
-            RowCount = 4
+            RowCount = changePassword ? 5 : 4
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, changePassword ? 78 : 54));
+        if (changePassword) root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var intro = new Label
         {
-            Text = "Create the password or PIN used to encrypt notes inside this EXE.",
+            Text = changePassword
+                ? "Changing the password commits current notes and the draft, then restarts. Exported backups keep their original password."
+                : "Create the password or PIN used to encrypt notes inside this EXE.",
             Dock = DockStyle.Fill,
             AutoSize = false
         };
         root.Controls.Add(intro, 0, 0);
         root.SetColumnSpan(intro, 2);
 
-        root.Controls.Add(new Label { Text = "Password/PIN", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, 1);
+        int row = 1;
+        if (changePassword)
+        {
+            root.Controls.Add(new Label { Text = "Current", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, row);
+            ConfigurePasswordBox(_currentBox);
+            root.Controls.Add(_currentBox, 1, row++);
+        }
+        root.Controls.Add(new Label { Text = changePassword ? "New password/PIN" : "Password/PIN", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, row);
         ConfigurePasswordBox(_passwordBox);
-        root.Controls.Add(_passwordBox, 1, 1);
+        root.Controls.Add(_passwordBox, 1, row++);
 
-        root.Controls.Add(new Label { Text = "Confirm", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, 2);
+        root.Controls.Add(new Label { Text = "Confirm", TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, row);
         ConfigurePasswordBox(_confirmBox);
-        root.Controls.Add(_confirmBox, 1, 2);
+        root.Controls.Add(_confirmBox, 1, row++);
 
         var buttons = CreateButtons();
-        root.Controls.Add(buttons, 0, 3);
+        root.Controls.Add(buttons, 0, row);
         root.SetColumnSpan(buttons, 2);
 
         Controls.Add(root);
-        AcceptButton = buttons.Controls.OfType<Button>().First(button => button.Text == "Create");
+        AcceptButton = buttons.Controls.OfType<Button>().First(button => button.DialogResult != DialogResult.Cancel);
         CancelButton = buttons.Controls.OfType<Button>().First(button => button.DialogResult == DialogResult.Cancel);
     }
 
     public string Password { get; private set; } = string.Empty;
+    public string CurrentPassword => _currentBox.Text;
 
     private static void ConfigurePasswordBox(TextBox textBox)
     {
@@ -66,7 +80,7 @@ internal sealed class PasswordSetupForm : Form
     {
         var okButton = new Button
         {
-            Text = "Create",
+            Text = _changePassword ? "Change and save" : "Create",
             AutoSize = true
         };
         okButton.Click += ValidatePassword;

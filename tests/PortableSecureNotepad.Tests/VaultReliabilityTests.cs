@@ -14,33 +14,34 @@ public sealed class VaultReliabilityTests
     {
         using var fixture = new VaultFixture();
         var request = fixture.Store.PrepareCommit(Payload("new note"));
-        File.Copy(fixture.Target, request.BackupPath);
-        foreach (string path in new[] { request.ReplacementPath, request.BackupPath, request.HelperPath })
+        string legacyBackup = Path.Combine(Path.GetDirectoryName(fixture.Target)!, "notepad.psn-legacy.backup.exe");
+        File.Copy(fixture.Target, legacyBackup);
+        foreach (string path in new[] { request.ReplacementPath, legacyBackup, request.HelperPath })
             File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddHours(-2));
 
         fixture.Store.CleanupStaleTemporaryFiles(TimeSpan.FromHours(1));
 
         Assert.IsTrue(File.Exists(request.ReplacementPath));
-        Assert.IsTrue(File.Exists(request.BackupPath));
+        Assert.IsTrue(File.Exists(legacyBackup));
         Assert.IsFalse(File.Exists(request.HelperPath));
         Assert.AreEqual("new note", ReadNote(request.ReplacementPath));
         CollectionAssert.Contains(fixture.Store.GetPendingRecoveryPaths().ToArray(), request.ReplacementPath);
     }
 
     [TestMethod]
-    public void Replacement_RetainsPreviousDecryptableVaultAndVerifiesNewVault()
+    public void Replacement_OverwritesTargetAndVerifiesNewVaultWithoutCreatingBackup()
     {
         using var fixture = new VaultFixture();
-        string previousHash = ExecutableVaultStore.GetFileHash(fixture.Target);
         var request = fixture.Store.PrepareCommit(Payload("new note"));
+        string replacementHash = ExecutableVaultStore.GetFileHash(request.ReplacementPath);
 
         string committedHash = ExecutableReplacement.CompleteReplacement(request);
 
         Assert.AreEqual("new note", ReadNote(fixture.Target));
-        Assert.AreEqual("old note", ReadNote(request.BackupPath));
-        Assert.AreEqual(previousHash, ExecutableVaultStore.GetFileHash(request.BackupPath));
+        Assert.AreEqual(replacementHash, committedHash);
         Assert.AreEqual(committedHash, ExecutableVaultStore.GetFileHash(fixture.Target));
         Assert.IsFalse(File.Exists(request.ReplacementPath));
+        Assert.IsEmpty(Directory.GetFiles(Path.GetDirectoryName(fixture.Target)!, "*.backup.exe"));
     }
 
     [TestMethod]
@@ -55,7 +56,7 @@ public sealed class VaultReliabilityTests
 
         Assert.AreEqual("first writer", ReadNote(fixture.Target));
         Assert.AreEqual("second writer", ReadNote(second.ReplacementPath));
-        Assert.AreEqual("old note", ReadNote(first.BackupPath));
+        Assert.IsEmpty(Directory.GetFiles(Path.GetDirectoryName(fixture.Target)!, "*.backup.exe"));
     }
 
     [TestMethod]
@@ -69,17 +70,18 @@ public sealed class VaultReliabilityTests
     }
 
     [TestMethod]
-    public void Replacement_DoesNotOverwriteExistingBackup()
+    public void Replacement_LeavesExistingLegacyBackupUntouched()
     {
         using var fixture = new VaultFixture();
         var request = fixture.Store.PrepareCommit(Payload("pending"));
-        File.WriteAllText(request.BackupPath, "valuable recovery data");
+        string legacyBackup = Path.Combine(Path.GetDirectoryName(fixture.Target)!, "notepad.psn-legacy.backup.exe");
+        File.WriteAllText(legacyBackup, "valuable recovery data");
 
-        Assert.ThrowsExactly<IOException>(() => ExecutableReplacement.CompleteReplacement(request));
+        ExecutableReplacement.CompleteReplacement(request);
 
-        Assert.AreEqual("valuable recovery data", File.ReadAllText(request.BackupPath));
-        Assert.AreEqual("old note", ReadNote(fixture.Target));
-        Assert.AreEqual("pending", ReadNote(request.ReplacementPath));
+        Assert.AreEqual("valuable recovery data", File.ReadAllText(legacyBackup));
+        Assert.AreEqual("pending", ReadNote(fixture.Target));
+        Assert.HasCount(1, Directory.GetFiles(Path.GetDirectoryName(fixture.Target)!, "*.backup.exe"));
     }
 
     [TestMethod]
@@ -148,7 +150,8 @@ public sealed class VaultReliabilityTests
     {
         using var fixture = new VaultFixture();
         var request = fixture.Store.PrepareCommit(Payload("pending"));
-        string[] args = ["--cleanup", request.ReplacementPath, "--cleanup", request.BackupPath,
+        string legacyBackup = Path.Combine(Path.GetDirectoryName(fixture.Target)!, "notepad.psn-legacy.backup.exe");
+        string[] args = ["--cleanup", request.ReplacementPath, "--cleanup", legacyBackup,
             "--cleanup", fixture.Target, "--cleanup", request.HelperPath,
             "--cleanup", Path.Combine(Path.GetTempPath(), "foreign.psn-id.helper.exe")];
 

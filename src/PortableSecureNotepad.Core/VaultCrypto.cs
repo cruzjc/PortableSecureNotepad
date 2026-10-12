@@ -150,10 +150,11 @@ public static class VaultCrypto
         }
     }
 
-    private static void ValidateDocument(VaultDocument document)
+    internal static void ValidateDocument(VaultDocument document)
     {
         if (document.Version != CurrentVersion || document.Notes is null ||
-            document.Notes.Any(note => note is null || note.Text is null))
+            document.Notes.Any(note => note is null || note.Text is null) ||
+            document.Notes.Select(note => note.Id).Distinct().Count() != document.Notes.Count)
         {
             throw new InvalidDataException("Vault document has an unsupported version or invalid note data.");
         }

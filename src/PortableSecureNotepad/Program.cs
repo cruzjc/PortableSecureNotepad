@@ -18,7 +18,7 @@ internal static class Program
         {
             string recoveryDirectory = Path.GetDirectoryName(Environment.ProcessPath) ?? Environment.CurrentDirectory;
             MessageBox.Show(
-                $"{ex.Message}{Environment.NewLine}{Environment.NewLine}Pending and backup EXEs are preserved in:{Environment.NewLine}{recoveryDirectory}{Environment.NewLine}Copy a recovery EXE to a new filename and open it with your password. Keep the original files until recovery is verified.",
+                $"{ex.Message}{Environment.NewLine}{Environment.NewLine}Any pending recovery EXEs are preserved in:{Environment.NewLine}{recoveryDirectory}{Environment.NewLine}Copy a pending EXE to a new filename and open it with your password. Keep the original files until recovery is verified.",
                 "Vault operation failed",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
@@ -58,7 +58,7 @@ internal static class Program
         string? completionHash = ExecutableReplacement.GetCommitCompletionHash(args);
         if (completionHash is not null && ExecutableVaultStore.GetFileHash(executablePath) != completionHash)
         {
-            throw new InvalidDataException("The restarted EXE does not match the committed vault. Recover from the backup EXE.");
+            throw new InvalidDataException("The restarted EXE does not match the committed vault. Preserve it and restore a manually exported backup if available.");
         }
         ExecutableReplacement.DeleteWithRetriesInBackground(ExecutableReplacement.GetCleanupPaths(args, executablePath));
 
@@ -106,10 +106,14 @@ internal static class Program
 
         if (completionHash is not null)
         {
-            MessageBox.Show("The encrypted vault was saved and verified. The previous EXE was retained as a backup.",
+            MessageBox.Show("The encrypted vault was saved and verified in this EXE.",
                 "Commit saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
-        Application.Run(new MainForm(store, document, password));
+        using var session = new VaultSession(document, password);
+        // The session owns the unlocked state and can release it during manual locking.
+        document = null!;
+        password = string.Empty;
+        Application.Run(new MainForm(store, session));
         return 0;
     }
 

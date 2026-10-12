@@ -97,10 +97,9 @@ public static class ExecutableReplacement
         string targetPath = Path.GetFullPath(GetRequiredValue(args, "--target"));
         string replacementPath = Path.GetFullPath(GetRequiredValue(args, "--replacement"));
         string helperPath = Path.GetFullPath(GetRequiredValue(args, "--helper"));
-        string backupPath = Path.GetFullPath(GetRequiredValue(args, "--backup"));
         string expectedHash = GetRequiredValue(args, "--expected-hash");
 
-        return new ReplacementRequest(parentProcessId, targetPath, replacementPath, helperPath, backupPath, expectedHash);
+        return new ReplacementRequest(parentProcessId, targetPath, replacementPath, helperPath, expectedHash);
     }
 
     private static string GetRequiredValue(IReadOnlyList<string> args, string name)
@@ -140,10 +139,6 @@ public static class ExecutableReplacement
     public static string CompleteReplacement(ReplacementRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (File.Exists(request.BackupPath))
-        {
-            throw new IOException("The backup path already exists; refusing to overwrite recovery data.");
-        }
         if (EmbeddedPayload.ReadPayload(request.ReplacementPath) is not { Length: > 0 })
         {
             throw new InvalidDataException("The replacement EXE has no embedded vault.");
@@ -159,14 +154,10 @@ public static class ExecutableReplacement
                 {
                     throw new InvalidDataException("The target EXE changed before replacement. The pending EXE has been preserved.");
                 }
-                File.Replace(request.ReplacementPath, request.TargetPath, request.BackupPath);
-                if (ExecutableVaultStore.GetFileHash(request.BackupPath) != request.ExpectedTargetHash)
-                {
-                    throw new InvalidDataException("The target changed during replacement. Both the saved EXE and backup are preserved; inspect the backup before continuing.");
-                }
+                File.Replace(request.ReplacementPath, request.TargetPath, null);
                 if (ExecutableVaultStore.GetFileHash(request.TargetPath) != replacementHash)
                 {
-                    throw new InvalidDataException("The saved EXE failed verification. Recover from the backup EXE.");
+                    throw new InvalidDataException("The saved EXE failed verification. Preserve this EXE and restore a manually exported backup if available.");
                 }
                 return replacementHash;
             }
