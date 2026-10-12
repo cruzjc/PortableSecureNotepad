@@ -11,6 +11,7 @@ public sealed class VaultSession : IDisposable
     private byte[]? _lockedCheckpoint;
     private readonly HashSet<Guid> _changedIds = [];
     private readonly HashSet<Guid> _addedIds = [];
+    private readonly HashSet<Guid> _savedIds;
     private Guid _draftId = Guid.NewGuid();
     private DateTimeOffset _draftCreatedAt = DateTimeOffset.UtcNow;
     private DateTimeOffset _draftUpdatedAt = DateTimeOffset.UtcNow;
@@ -23,6 +24,7 @@ public sealed class VaultSession : IDisposable
         VaultCrypto.ValidateDocument(document);
         if (string.IsNullOrWhiteSpace(password)) throw new ArgumentException("Password/PIN cannot be empty.", nameof(password));
         _document = Clone(document);
+        _savedIds = document.Notes.Select(note => note.Id).ToHashSet();
         _password = password;
     }
 
@@ -81,6 +83,20 @@ public sealed class VaultSession : IDisposable
         if (added) _addedIds.Add(id);
         CancelDraft();
         return id;
+    }
+
+    public void DeleteNote(Guid id)
+    {
+        EnsureUnlocked();
+        NoteEntry note = Document.Notes.SingleOrDefault(note => note.Id == id)
+            ?? throw new ArgumentException("The selected entry no longer exists.", nameof(id));
+        if (EditingNoteId == id) CancelDraft();
+        Document.Notes.Remove(note);
+        // Removing a newly staged entry cancels its addition. Saved entries remain dirty
+        // even when the last entry is deleted, so Commit All can persist an empty vault.
+        _addedIds.Remove(id);
+        if (_savedIds.Contains(id)) _changedIds.Add(id);
+        else _changedIds.Remove(id);
     }
 
     public VaultDocument Snapshot(bool includeDraft = true)
@@ -190,6 +206,7 @@ public sealed class VaultSession : IDisposable
         _draft = string.Empty;
         _changedIds.Clear();
         _addedIds.Clear();
+        _savedIds.Clear();
         _disposed = true;
     }
 }

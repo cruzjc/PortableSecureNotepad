@@ -7,6 +7,7 @@ internal sealed class MainForm : Form
 {
     private readonly ExecutableVaultStore _store;
     private readonly VaultSession _session;
+    private readonly Func<NoteEntry, bool, bool> _confirmDeletion;
     private readonly TextBox _searchBox = new() { Name = "SearchBox", AccessibleName = "Search notes" };
     private readonly ListBox _noteList = new() { Name = "NoteList", AccessibleName = "Note entries" };
     private readonly TextBox _previewBox = new() { Name = "PreviewBox", AccessibleName = "Selected note", MaxLength = 0 };
@@ -14,22 +15,28 @@ internal sealed class MainForm : Form
     private readonly Label _editorLabel = new();
     private readonly Label _statusLabel = new();
     private readonly Button _stageButton = new();
-    private readonly Button _commitButton = new();
+    private readonly Button _commitButton = new() { Name = "CommitButton", AccessibleName = "Commit all changes" };
     private readonly Button _editButton = new();
+    private readonly Button _deleteButton = new() { Name = "DeleteSelectedButton", AccessibleName = "Delete selected entry" };
     private readonly Button _cancelEditButton = new();
     private readonly MenuStrip _menu = new();
     private readonly ToolStripMenuItem _fileMenu = new("&File");
     private readonly ToolStripMenuItem _noteMenu = new("&Note");
+    private readonly ToolStripMenuItem _deleteItem = new("&Delete selected...")
+    {
+        Name = "DeleteSelected", ShortcutKeys = Keys.Control | Keys.Shift | Keys.D
+    };
     private readonly ToolStripMenuItem _changePasswordItem = new("Change &password/PIN...");
     private readonly ToolStripMenuItem _lockItem = new("&Lock now") { ShortcutKeys = Keys.Control | Keys.L };
     private readonly TableLayoutPanel _layout = new();
     private bool _isCommitting;
     private bool _updatingView;
 
-    public MainForm(ExecutableVaultStore store, VaultSession session)
+    public MainForm(ExecutableVaultStore store, VaultSession session, Func<NoteEntry, bool, bool>? confirmDeletion = null)
     {
         _store = store;
         _session = session;
+        _confirmDeletion = confirmDeletion ?? ConfirmDeletion;
         Text = "Portable Secure Notepad";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(820, 620);
@@ -53,6 +60,9 @@ internal sealed class MainForm : Form
         _noteMenu.DropDownItems.Add(Command("&Edit selected", Keys.Control | Keys.E, EditSelected));
         _noteMenu.DropDownItems.Add(Command("&Save entry / update", Keys.Control | Keys.S, SaveDraft));
         _noteMenu.DropDownItems.Add(Command("&Commit all", Keys.Control | Keys.Shift | Keys.S, () => CommitChanges()));
+        _noteMenu.DropDownItems.Add(new ToolStripSeparator());
+        _deleteItem.Click += (_, _) => Execute(DeleteSelected);
+        _noteMenu.DropDownItems.Add(_deleteItem);
         _changePasswordItem.Click += (_, _) => Execute(ChangePassword);
         _lockItem.Click += (_, _) => Execute(ToggleLock);
         var vaultMenu = new ToolStripMenuItem("&Vault");
@@ -100,8 +110,9 @@ internal sealed class MainForm : Form
         _previewBox.BackColor = SystemColors.Window;
         split.Panel2.Controls.Add(_previewBox);
         _layout.Controls.Add(split, 0, 1);
-        var editor = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3 };
+        var editor = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4 };
         editor.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        editor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 125));
         editor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 125));
         editor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
         _editorLabel.Dock = DockStyle.Fill;
@@ -111,10 +122,14 @@ internal sealed class MainForm : Form
         _editButton.Dock = DockStyle.Fill;
         _editButton.Click += (_, _) => Execute(EditSelected);
         editor.Controls.Add(_editButton, 1, 0);
+        _deleteButton.Text = "Delete selected";
+        _deleteButton.Dock = DockStyle.Fill;
+        _deleteButton.Click += (_, _) => Execute(DeleteSelected);
+        editor.Controls.Add(_deleteButton, 2, 0);
         _cancelEditButton.Text = "Cancel edit";
         _cancelEditButton.Dock = DockStyle.Fill;
         _cancelEditButton.Click += (_, _) => Execute(CancelEdit);
-        editor.Controls.Add(_cancelEditButton, 2, 0);
+        editor.Controls.Add(_cancelEditButton, 3, 0);
         _layout.Controls.Add(editor, 0, 2);
         _composeBox.Dock = DockStyle.Fill;
         _composeBox.Multiline = true;
@@ -186,6 +201,8 @@ internal sealed class MainForm : Form
         }
         else _previewBox.Clear();
         _editButton.Enabled = !_isCommitting && !_session.IsLocked && _noteList.SelectedItem is not null;
+        _deleteButton.Enabled = _editButton.Enabled;
+        _deleteItem.Enabled = _editButton.Enabled;
     }
 
     internal void SaveDraft()
@@ -221,6 +238,23 @@ internal sealed class MainForm : Form
         if (_session.HasDraftChanges && MessageBox.Show(this, "Discard the changes in the editor?", "Cancel edit",
             MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
         _session.CancelDraft();
+        RefreshWorkspace();
+    }
+
+    private bool ConfirmDeletion(NoteEntry note, bool discardingEditor)
+    {
+        string editorWarning = discardingEditor ? "\r\nThis also discards the editor text for this entry." : string.Empty;
+        return MessageBox.Show(this,
+            $"Delete the selected entry created {note.CreatedAt.LocalDateTime:g}?{editorWarning}\r\nUse Commit All to save the deletion to the EXE.",
+            "Delete selected entry", MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+    }
+
+    private void DeleteSelected()
+    {
+        if (_session.IsLocked || _isCommitting || _noteList.SelectedItem is not NoteListItem item) return;
+        if (!_confirmDeletion(item.Note, _session.EditingNoteId == item.Note.Id)) return;
+        _session.DeleteNote(item.Note.Id);
         RefreshWorkspace();
     }
 
@@ -373,6 +407,8 @@ internal sealed class MainForm : Form
         _commitButton.Enabled = unlocked && _session.HasChanges;
         _cancelEditButton.Enabled = unlocked && _session.EditingNoteId is not null;
         _editButton.Enabled = unlocked && _noteList.SelectedItem is not null;
+        _deleteButton.Enabled = _editButton.Enabled;
+        _deleteItem.Enabled = _editButton.Enabled;
         if (unlocked)
         {
             string draft = _session.HasDraftChanges ? "; unsaved draft" : string.Empty;

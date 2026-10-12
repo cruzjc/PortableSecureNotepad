@@ -76,6 +76,91 @@ public sealed class MainFormTests
         Capture(dialog, "password-change.png");
     });
 
+    [TestMethod]
+    public void DeleteCanceled_PreservesSelectedEntryAndItsEditorDraft() => OnSta(() =>
+    {
+        using var fixture = new FormFixture();
+        bool asked = false;
+        using var form = new MainForm(fixture.Store, fixture.Session, (note, discardingEditor) =>
+        {
+            asked = true;
+            Assert.AreEqual(fixture.Id, note.Id);
+            Assert.IsTrue(discardingEditor);
+            return false;
+        });
+        form.BeginEdit(fixture.Id);
+        var editor = (TextBox)form.Controls.Find("ComposeBox", true).Single();
+        editor.Text = "keep my editor draft";
+        DeleteCommand(form).PerformClick();
+        Assert.IsTrue(asked);
+        Assert.HasCount(1, fixture.Session.Notes);
+        Assert.AreEqual("keep my editor draft", editor.Text);
+        Assert.AreEqual(fixture.Id, fixture.Session.EditingNoteId);
+    });
+
+    [TestMethod]
+    public void DeleteConfirmed_ClearsLastEditedEntryAndEnablesEmptyVaultCommit() => OnSta(() =>
+    {
+        using var fixture = new FormFixture();
+        using var form = new MainForm(fixture.Store, fixture.Session, (_, _) => true);
+        form.BeginEdit(fixture.Id);
+        var editor = (TextBox)form.Controls.Find("ComposeBox", true).Single();
+        editor.Text = "delete this edited draft";
+        Capture(form, "delete-selected.png");
+        DeleteCommand(form).PerformClick();
+        Assert.IsEmpty(fixture.Session.Notes);
+        Assert.AreEqual(string.Empty, editor.Text);
+        Assert.AreEqual(string.Empty, ((TextBox)form.Controls.Find("PreviewBox", true).Single()).Text);
+        Assert.IsEmpty(((ListBox)form.Controls.Find("NoteList", true).Single()).Items);
+        Assert.IsFalse(DeleteCommand(form).Enabled);
+        Assert.IsFalse(form.Controls.Find("DeleteSelectedButton", true).Single().Enabled);
+        Assert.IsTrue(form.Controls.Find("CommitButton", true).Single().Enabled);
+        Capture(form, "deleted-last-entry.png");
+    });
+
+    [TestMethod]
+    public void DeleteFilteredSelection_RemovesCorrectEntryAndPreservesUnrelatedDraft() => OnSta(() =>
+    {
+        using var fixture = new FormFixture();
+        fixture.Session.UpdateDraft("another entry");
+        Guid other = fixture.Session.SaveDraft();
+        using var form = new MainForm(fixture.Store, fixture.Session, (note, discardingEditor) =>
+        {
+            Assert.AreEqual(fixture.Id, note.Id);
+            Assert.IsFalse(discardingEditor);
+            return true;
+        });
+        ((TextBox)form.Controls.Find("SearchBox", true).Single()).Text = "original";
+        var editor = (TextBox)form.Controls.Find("ComposeBox", true).Single();
+        editor.Text = "unrelated new draft";
+        DeleteCommand(form).PerformClick();
+        Assert.AreEqual(other, fixture.Session.Notes.Single().Id);
+        Assert.AreEqual("unrelated new draft", editor.Text);
+        Assert.IsEmpty(((ListBox)form.Controls.Find("NoteList", true).Single()).Items);
+    });
+
+    [TestMethod]
+    public void DeleteWithNoSelectionOrLocked_DoesNotPromptOrChangeNotes() => OnSta(() =>
+    {
+        using var fixture = new FormFixture();
+        int confirmations = 0;
+        using var form = new MainForm(fixture.Store, fixture.Session, (_, _) => { confirmations++; return true; });
+        ((TextBox)form.Controls.Find("SearchBox", true).Single()).Text = "no matching entries";
+        Assert.IsFalse(DeleteCommand(form).Enabled);
+        DeleteCommand(form).PerformClick();
+        form.LockWorkspace();
+        Assert.IsFalse(DeleteCommand(form).Enabled);
+        DeleteCommand(form).PerformClick();
+        Assert.AreEqual(0, confirmations);
+        form.UnlockWorkspace("password");
+        Assert.HasCount(1, fixture.Session.Notes);
+        Assert.IsFalse(fixture.Session.HasChanges);
+    });
+
+    private static ToolStripMenuItem DeleteCommand(MainForm form) =>
+        ((ToolStripMenuItem)form.MainMenuStrip!.Items[1]).DropDownItems.OfType<ToolStripMenuItem>()
+        .Single(item => item.Name == "DeleteSelected");
+
     private static IEnumerable<Control> Descendants(Control parent)
     {
         foreach (Control control in parent.Controls)

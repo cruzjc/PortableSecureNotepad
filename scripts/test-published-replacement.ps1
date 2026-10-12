@@ -22,7 +22,7 @@ const string newPassword = "new-smoke-password";
 if (args.Length > 0 && args[0] == "verify-backup")
 {
     var saved = VaultCrypto.Decrypt(EmbeddedPayload.ReadPayload(args[1])!, newPassword);
-    if (saved.Notes.Count != 3 || !saved.Notes.Any(note => note.Text == "committed state"))
+    if (saved.Notes.Count != 2 || !saved.Notes.Any(note => note.Text == "committed state"))
         throw new Exception("Publish backup did not retain the rekeyed, edited vault and draft");
     Console.WriteLine("Publish backup decrypts to the committed state.");
     return;
@@ -75,8 +75,8 @@ try
     byte[] savedPayload = EmbeddedPayload.ReadPayload(executable)!;
     var saved = VaultCrypto.Decrypt(savedPayload, newPassword);
     bool secondCommit = File.Exists(Path.Combine(root, "second-commit.txt"));
-    if (saved.Notes.Count != (secondCommit ? 3 : 2) || !saved.Notes.Any(note => note.Text == "committed state") ||
-        !saved.Notes.Any(note => note.Text == "preserved draft")) throw new Exception("Edited note and draft were not saved");
+    if (saved.Notes.Count != 2 || !saved.Notes.Any(note => note.Text == "committed state") ||
+        (!secondCommit && !saved.Notes.Any(note => note.Text == "preserved draft"))) throw new Exception("Expected notes were not saved");
     bool oldPasswordRejected = false;
     try { VaultCrypto.Decrypt(savedPayload, password); }
     catch (VaultUnlockException) { oldPasswordRejected = true; }
@@ -108,6 +108,7 @@ try
         // Commit a second time to the same executable and check that no EXEs accumulate.
         File.WriteAllText(Path.Combine(root, "second-commit.txt"), "started");
         using var session = new VaultSession(saved, newPassword);
+        session.DeleteNote(session.Notes.Single(note => note.Text == "preserved draft").Id);
         session.UpdateDraft("second commit entry");
         var store = new ExecutableVaultStore(executable);
         var request = store.PrepareCommit(session.CreateCommitPayload());
@@ -117,7 +118,9 @@ try
     }
     if (!saved.Notes.Any(note => note.Text == "second commit entry"))
         throw new Exception("Second commit was not saved in the same EXE");
-    File.WriteAllText(Path.Combine(root, "passed.txt"), "Two commits to the same EXE passed: saved notes and password verified, zero backup EXEs, temporary helpers cleaned up, exactly one EXE remaining. Manual exports/import also passed.");
+    if (saved.Notes.Any(note => note.Text == "preserved draft"))
+        throw new Exception("Deleted entry was still present after commit and relaunch");
+    File.WriteAllText(Path.Combine(root, "passed.txt"), "Two commits to the same EXE passed: entry deletion persisted after relaunch, remaining notes and password verified, zero backup EXEs, temporary helpers cleaned up, exactly one EXE remaining. Manual exports/import also passed.");
 }
 catch (Exception ex)
 {
