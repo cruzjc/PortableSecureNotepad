@@ -6,6 +6,7 @@ public static class ExecutableReplacement
 {
     public const string ReplaceArg = "--replace";
     public const string CleanupArg = "--cleanup";
+    public const string CommitCompleteArg = "--commit-complete";
 
     private const int ReplaceAttempts = 100;
     private const int ReplaceDelayMs = 100;
@@ -17,21 +18,20 @@ public static class ExecutableReplacement
 
     public static int RunReplacementHelper(IReadOnlyList<string> args)
     {
-        try
+        ReplacementRequest parsed = ParseReplacementArguments(args);
+        WaitForParentExit(parsed.ParentProcessId, TimeSpan.FromSeconds(30));
+        string savedHash;
+        using (var instanceLock = VaultInstanceLock.TryAcquire(parsed.TargetPath, TimeSpan.FromSeconds(10))
+            ?? throw new IOException("Another instance is using this vault. The pending EXE has been preserved."))
         {
-            ReplacementArguments parsed = ParseReplacementArguments(args);
-            WaitForParentExit(parsed.ParentProcessId, TimeSpan.FromSeconds(30));
-            MoveWithRetries(parsed.ReplacementPath, parsed.TargetPath);
-            StartRelaunchedTarget(parsed.TargetPath, parsed.HelperPath);
-            return 0;
+            savedHash = CompleteReplacement(parsed);
         }
-        catch
-        {
-            return 1;
-        }
+        // The relaunched UI acquires the same lock before reading the vault.
+        StartRelaunchedTarget(parsed.TargetPath, parsed.HelperPath, savedHash);
+        return 0;
     }
 
-    public static IReadOnlyList<string> GetCleanupPaths(IReadOnlyList<string> args)
+    public static IReadOnlyList<string> GetCleanupPaths(IReadOnlyList<string> args, string executablePath)
     {
         var cleanupPaths = new List<string>();
 
@@ -39,7 +39,15 @@ public static class ExecutableReplacement
         {
             if (string.Equals(args[i], CleanupArg, StringComparison.Ordinal) && i + 1 < args.Count)
             {
-                cleanupPaths.Add(args[i + 1]);
+                string path = Path.GetFullPath(args[i + 1]);
+                string directory = Path.GetDirectoryName(Path.GetFullPath(executablePath))!;
+                string prefix = Path.GetFileNameWithoutExtension(executablePath) + ".psn-";
+                if (string.Equals(Path.GetDirectoryName(path), directory, StringComparison.OrdinalIgnoreCase)
+                    && Path.GetFileName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    && path.EndsWith(".helper.exe", StringComparison.OrdinalIgnoreCase))
+                {
+                    cleanupPaths.Add(path);
+                }
                 i++;
             }
         }
@@ -69,7 +77,16 @@ public static class ExecutableReplacement
         });
     }
 
-    private static ReplacementArguments ParseReplacementArguments(IReadOnlyList<string> args)
+    public static string? GetCommitCompletionHash(IReadOnlyList<string> args)
+    {
+        for (int i = 0; i < args.Count - 1; i++)
+        {
+            if (args[i] == CommitCompleteArg) return args[i + 1];
+        }
+        return null;
+    }
+
+    private static ReplacementRequest ParseReplacementArguments(IReadOnlyList<string> args)
     {
         if (!IsReplacementMode(args))
         {
@@ -80,8 +97,10 @@ public static class ExecutableReplacement
         string targetPath = Path.GetFullPath(GetRequiredValue(args, "--target"));
         string replacementPath = Path.GetFullPath(GetRequiredValue(args, "--replacement"));
         string helperPath = Path.GetFullPath(GetRequiredValue(args, "--helper"));
+        string backupPath = Path.GetFullPath(GetRequiredValue(args, "--backup"));
+        string expectedHash = GetRequiredValue(args, "--expected-hash");
 
-        return new ReplacementArguments(parentProcessId, targetPath, replacementPath, helperPath);
+        return new ReplacementRequest(parentProcessId, targetPath, replacementPath, helperPath, backupPath, expectedHash);
     }
 
     private static string GetRequiredValue(IReadOnlyList<string> args, string name)
@@ -104,7 +123,10 @@ public static class ExecutableReplacement
             using Process parent = Process.GetProcessById(parentProcessId);
             if (!parent.HasExited)
             {
-                parent.WaitForExit((int)timeout.TotalMilliseconds);
+                if (!parent.WaitForExit((int)timeout.TotalMilliseconds))
+                {
+                    throw new IOException("The app did not exit in time. The pending EXE has been preserved.");
+                }
             }
         }
         catch (ArgumentException)
@@ -115,22 +137,44 @@ public static class ExecutableReplacement
         }
     }
 
-    private static void MoveWithRetries(string replacementPath, string targetPath)
+    public static string CompleteReplacement(ReplacementRequest request)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        if (File.Exists(request.BackupPath))
+        {
+            throw new IOException("The backup path already exists; refusing to overwrite recovery data.");
+        }
+        if (EmbeddedPayload.ReadPayload(request.ReplacementPath) is not { Length: > 0 })
+        {
+            throw new InvalidDataException("The replacement EXE has no embedded vault.");
+        }
+        string replacementHash = ExecutableVaultStore.GetFileHash(request.ReplacementPath);
         Exception? lastException = null;
 
         for (int attempt = 0; attempt < ReplaceAttempts; attempt++)
         {
             try
             {
-                File.Move(replacementPath, targetPath, overwrite: true);
-                return;
+                if (ExecutableVaultStore.GetFileHash(request.TargetPath) != request.ExpectedTargetHash)
+                {
+                    throw new InvalidDataException("The target EXE changed before replacement. The pending EXE has been preserved.");
+                }
+                File.Replace(request.ReplacementPath, request.TargetPath, request.BackupPath);
+                if (ExecutableVaultStore.GetFileHash(request.BackupPath) != request.ExpectedTargetHash)
+                {
+                    throw new InvalidDataException("The target changed during replacement. Both the saved EXE and backup are preserved; inspect the backup before continuing.");
+                }
+                if (ExecutableVaultStore.GetFileHash(request.TargetPath) != replacementHash)
+                {
+                    throw new InvalidDataException("The saved EXE failed verification. Recover from the backup EXE.");
+                }
+                return replacementHash;
             }
-            catch (IOException ex)
+            catch (IOException ex) when (File.Exists(request.ReplacementPath))
             {
                 lastException = ex;
             }
-            catch (UnauthorizedAccessException ex)
+            catch (UnauthorizedAccessException ex) when (File.Exists(request.ReplacementPath))
             {
                 lastException = ex;
             }
@@ -141,7 +185,7 @@ public static class ExecutableReplacement
         throw new IOException("Could not replace the executable.", lastException);
     }
 
-    private static void StartRelaunchedTarget(string targetPath, string helperPath)
+    private static void StartRelaunchedTarget(string targetPath, string helperPath, string savedHash)
     {
         var startInfo = new ProcessStartInfo(targetPath)
         {
@@ -151,8 +195,11 @@ public static class ExecutableReplacement
 
         startInfo.ArgumentList.Add(CleanupArg);
         startInfo.ArgumentList.Add(helperPath);
+        startInfo.ArgumentList.Add(CommitCompleteArg);
+        startInfo.ArgumentList.Add(savedHash);
 
-        Process.Start(startInfo);
+        using Process process = Process.Start(startInfo)
+            ?? throw new IOException("The vault was saved, but relaunch failed. Open the target EXE manually.");
     }
 
     private static void DeleteWithRetries(string path)
@@ -179,9 +226,4 @@ public static class ExecutableReplacement
         }
     }
 
-    private sealed record ReplacementArguments(
-        int ParentProcessId,
-        string TargetPath,
-        string ReplacementPath,
-        string HelperPath);
 }

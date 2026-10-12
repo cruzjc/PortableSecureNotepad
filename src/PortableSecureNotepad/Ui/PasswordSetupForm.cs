@@ -92,7 +92,7 @@ internal sealed class PasswordSetupForm : Form
     private void ValidatePassword(object? sender, EventArgs e)
     {
         string password = _passwordBox.Text;
-        if (password.Length < 4)
+        if (password.Length < 4 || string.IsNullOrWhiteSpace(password))
         {
             MessageBox.Show(
                 "Use at least 4 characters.",
