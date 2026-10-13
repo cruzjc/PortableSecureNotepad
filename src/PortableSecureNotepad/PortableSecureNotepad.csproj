@@ -2,10 +2,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\PortableSecureNotepad.Core\PortableSecureNotepad.Core.csproj" />
+    <EmbeddedResource Include="Assets\App.ico" LogicalName="PortableSecureNotepad.AppIcon.ico" />
   </ItemGroup>
 
   <PropertyGroup>
     <AssemblyName>PortableSecureNotepad</AssemblyName>
+    <ApplicationIcon>Assets\App.ico</ApplicationIcon>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>

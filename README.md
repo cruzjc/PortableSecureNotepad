@@ -24,6 +24,8 @@ After publishing, run `.\scripts\test-published-replacement.ps1` to exercise the
 
 Publishing refuses to overwrite any existing output EXE because it may contain notes, including a damaged vault. Prefer a different `-Output` folder. If replacement is intentional, use `.\scripts\publish.ps1 -ReplaceExisting`; the previous EXE is retained as a uniquely named `.backup.exe` and verified before the script reports success. Publishing creates a clean app; it does not migrate notes from the backup into the new EXE. Close the app before replacing its EXE.
 
+The EXE and app windows use the original notebook-and-lock icon in `src/PortableSecureNotepad/Assets/App.ico`, with sizes from 16 to 256 pixels. To regenerate it, install Pillow and run `python scripts/generate-app-icon.py`. The checked-in ICO is used during normal builds; Python is not required to build or run the app.
+
 ## Use
 
 On first launch, create a password or PIN. Type note text into the compose box and click `Save Entry` to queue it. Repeat for as many entries as needed, then click `Commit All`. The app writes a temporary replacement, exits briefly, atomically overwrites the same EXE, and relaunches. The saved confirmation appears after the restarted EXE is verified and the vault is unlocked. Commits do not create automatic backup EXEs; after successful cleanup, only the original app EXE remains.

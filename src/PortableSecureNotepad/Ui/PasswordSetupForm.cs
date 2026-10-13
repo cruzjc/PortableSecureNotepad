@@ -9,6 +9,7 @@ internal sealed class PasswordSetupForm : Form
 
     public PasswordSetupForm(bool changePassword = false)
     {
+        Icon = AppIcon.Value;
         _changePassword = changePassword;
         Text = changePassword ? "Change Password/PIN" : "Create Password/PIN";
         StartPosition = FormStartPosition.CenterScreen;
