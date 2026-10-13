@@ -6,6 +6,7 @@ internal sealed class UnlockForm : Form
 
     public UnlockForm(string title = "Unlock Notes", string message = "Enter the password or PIN for this portable notepad.")
     {
+        Icon = AppIcon.Value;
         Text = title;
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;

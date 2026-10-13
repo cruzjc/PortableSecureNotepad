@@ -37,6 +37,7 @@ internal sealed class MainForm : Form
         _store = store;
         _session = session;
         _confirmDeletion = confirmDeletion ?? ConfirmDeletion;
+        Icon = AppIcon.Value;
         Text = "Portable Secure Notepad";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(820, 620);
